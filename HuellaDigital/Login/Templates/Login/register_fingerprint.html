@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Registro Touch ID</title>
+    <!-- 1. Importamos la librería traductora mediante un CDN -->
+    <script src="https://unpkg.com/@simplewebauthn/browser/dist/bundle/index.umd.min.js"></script>
+    <style>
+        /* Mismas variables del login para mantener la identidad visual */
+        :root {
+            --primary: #4f46e5;
+            --primary-hover: #4338ca;
+            --background: #f3f4f6;
+            --card-bg: #ffffff;
+            --text-main: #1f2937;
+            --text-muted: #6b7280;
+            --border-color: #e5e7eb;
+        }
+
+        body { 
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; 
+            background-color: var(--background);
+            color: var(--text-main);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            width: 100%;
+            max-width: 480px;
+            padding: 40px;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+            text-align: center;
+        }
+
+        /* Estilo para el enlace de "Volver" */
+        .back-link {
+            display: flex;
+            align-items: center;
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+            margin-bottom: 20px;
+            transition: color 0.2s ease;
+        }
+
+        .back-link:hover {
+            color: var(--primary);
+        }
+
+        h2 {
+            margin-top: 0;
+            margin-bottom: 5px;
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            margin-bottom: 25px;
+        }
+
+        .input-group {
+            text-align: left;
+            margin-bottom: 15px;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        input[type="text"],
+        input[type="email"] { 
+            width: 100%; 
+            padding: 12px 16px; 
+            font-size: 1rem; 
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            box-sizing: border-box;
+            transition: all 0.3s ease;
+        }
+
+        input[type="text"]:focus,
+        input[type="email"]:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+        }
+
+        button { 
+            width: 100%;
+            padding: 12px; 
+            font-size: 1rem; 
+            font-weight: 600;
+            cursor: pointer; 
+            border-radius: 8px;
+            border: none;
+            transition: background-color 0.3s, transform 0.1s;
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        .btn-primary {
+            background-color: var(--primary);
+            color: white;
+            margin-top: 10px;
+        }
+
+        .btn-primary:hover {
+            background-color: var(--primary-hover);
+        }
+
+        .btn-small {
+            width: auto;
+            padding: 6px 12px;
+            font-size: 0.85rem;
+            background-color: var(--background);
+            color: var(--text-muted);
+            margin-bottom: 15px;
+        }
+
+        .btn-small:hover {
+            background-color: var(--border-color);
+            color: var(--text-main);
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <!-- Enlace discreto para regresar -->
+        <a href="{% url 'webauthn_login_page' %}" class="back-link">← Volver al login</a>
+
+        <h2>Crear Cuenta</h2>
+        <p class="subtitle">Ingresa tus datos y guarda tu huella digital</p>
+        
+        {% csrf_token %}
+
+        <div class="input-group">
+            <label for="nombre">Nombre completo</label>
+            <input type="text" id="nombre">
+        </div>
+
+        <div class="input-group">
+            <label for="correo">Correo electrónico</label>
+            <input type="email" id="correo" placeholder="ejemplo@correo.com">
+        </div>
+
+        <div id="video-container">
+            <video id="video-stream" autoplay playsinline></video>
+        </div>
+        
+        <button id="btn-toggle-camera" class="btn-small">📷 Encender / Apagar Cámara</button>
+
+        <canvas id="canvas-capture" width="640" height="480" style="display: none;"></canvas>
+
+        <button id="btn-registrar" class="btn-primary">Registrarme</button>
+    </div>
+
+    <script>
+        // Extraemos la función principal de la librería que importamos arriba
+        const { startRegistration } = SimpleWebAuthnBrowser;
+
+        // Capturamos el botón y el párrafo para mostrar mensajes
+        const btnRegister = document.getElementById('btn-registrar');
+        const statusMessage = document.getElementById('status-message');
+
+        // Evento que se dispara al hacer clic en el botón
+        btnRegister.addEventListener('click', async () => {
+            statusMessage.innerText = "Conectando con el servidor...";
+
+            try {
+                // FASE 1: Pedir el desafío a Django (Ping)
+                const beginResponse = await fetch("{% url 'register_fingerprint_begin' %}");
+                const options = await beginResponse.json();
+
+                if (options.error) {
+                    statusMessage.innerText = "Error del servidor: " + options.error;
+                    return;
+                }
+
+                statusMessage.innerText = "Por favor, pon tu dedo en el Touch ID...";
+
+                // FASE 2: Despertar al Touch ID
+                // Aquí la librería traduce el JSON a binario y llama al hardware de Apple
+                const touchIdResponse = await startRegistration(options);
+
+                statusMessage.innerText = "Huella leída. Verificando con el servidor...";
+
+                // FASE 3: Enviar la firma criptográfica a Django (Pong)
+                const completeResponse = await fetch("{% url 'register_fingerprint_complete' %}", {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    // Traducimos la respuesta binaria del Touch ID a JSON para Django
+                    body: JSON.stringify(touchIdResponse),
+                });
+
+                const result = await completeResponse.json();
+
+                if (result.status === "ok") {
+                    statusMessage.innerText = "¡Éxito! " + result.message;
+                } else {
+                    statusMessage.innerText = "Error al verificar: " + result.error;
+                }
+
+            } catch (error) {
+                // Si el usuario cancela el recuadro del Touch ID o tarda mucho, cae aquí
+                statusMessage.innerText = "Proceso cancelado o fallido: " + error.message;
+                console.error(error);
+            }
+        });
+    </script>
+</body>
+</html>
